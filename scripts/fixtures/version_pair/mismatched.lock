@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright the Vortex contributors
+
+version = 4
+
+[[package]]
+name = "datafusion"
+version = "53.1.0"
+
+[[package]]
+name = "datafusion-cli"
+version = "54.0.0"
+
+[[package]]
+name = "vortex-datafusion"
+version = "0.69.0"

@@ -451,3 +451,23 @@ pub fn extract_memory_pool_size(size: &str) -> Result<usize, String> {
 pub fn extract_disk_limit(size: &str) -> Result<usize, String> {
     parse_size_string(size, "disk limit")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_byte_sized_limits() {
+        assert_eq!(extract_memory_pool_size("10g"), Ok(10 * (1 << 30)));
+        assert_eq!(extract_disk_limit("512mb"), Ok(512 * (1 << 20)));
+        assert_eq!(extract_disk_limit("42"), Ok(42));
+    }
+
+    #[test]
+    fn rejects_invalid_cli_values() {
+        assert!(parse_batch_size("0").is_err());
+        assert!(parse_command("").is_err());
+        assert!(extract_memory_pool_size("-1g").is_err());
+        assert!(extract_disk_limit("10xb").is_err());
+    }
+}

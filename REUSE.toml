@@ -7,6 +7,12 @@ SPDX-FileCopyrightText = "Copyright the Vortex contributors"
 SPDX-License-Identifier = "Apache-2.0"
 
 [[annotations]]
+path = "renovate.json"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright the Vortex contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
 path = "NOTICE"
 precedence = "override"
 SPDX-FileCopyrightText = [

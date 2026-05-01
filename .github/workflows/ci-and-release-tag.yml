@@ -1,0 +1,111 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright the Vortex contributors
+
+name: CI and Release Tag
+
+on:
+  pull_request:
+  push:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Check build
+        run: cargo check --locked
+
+      - name: Run tests
+        run: cargo nextest run --locked
+
+  release-tag:
+    name: Release Tag
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.deleted == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Compare release dependency versions
+        id: versions
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          zero_sha="0000000000000000000000000000000000000000"
+          if [[ "${BEFORE}" != "${zero_sha}" ]] && ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "${BEFORE}" || true
+          fi
+
+          if [[ "${BEFORE}" == "${zero_sha}" ]] || ! git cat-file -e "${BEFORE}:Cargo.lock" 2>/dev/null; then
+            tag="$(python3 scripts/version_pair.py tag)"
+            echo "initial release tag: ${tag}"
+            {
+              echo "release_needed=true"
+              echo "old_tag="
+              echo "new_tag=${tag}"
+              echo "changes=initial"
+            } >> "$GITHUB_OUTPUT"
+          else
+            git show "${BEFORE}:Cargo.lock" > /tmp/previous-Cargo.lock
+            python3 scripts/version_pair.py changed \
+              --old /tmp/previous-Cargo.lock \
+              --new Cargo.lock \
+              --github-output "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release tag
+        if: steps.versions.outputs.release_needed == 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.versions.outputs.new_tag }}
+        run: |
+          set -euo pipefail
+
+          head_commit="$(git rev-parse HEAD)"
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            tag_commit="$(git rev-list -n 1 "${TAG}")"
+            if [[ "${tag_commit}" == "${head_commit}" ]]; then
+              echo "Tag ${TAG} already exists at HEAD."
+              exit 0
+            fi
+
+            echo "Tag ${TAG} already exists at ${tag_commit}, not HEAD ${head_commit}." >&2
+            exit 1
+          fi
+
+          git tag "${TAG}"
+          git push origin "refs/tags/${TAG}"
