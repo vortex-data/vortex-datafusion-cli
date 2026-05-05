@@ -13,6 +13,6 @@ In the future we hope we can minimize the amount of identical code, but for the 
 
 Release tags use the format `<vortex-version>-<df-version>`, where `vortex-version` is the resolved `vortex-datafusion` crate version and `df-version` is the resolved `datafusion`/`datafusion-cli` crate version.
 
-Merges to `main` create a tag only when `Cargo.lock` changes either of those resolved versions. Code, docs, or unrelated dependency changes still run CI, but do not create release tags.
+Pushes to `main` create the current tag if it does not already exist. Later merges to `main` create a new tag only when `Cargo.lock` changes either of those resolved versions. Code, docs, or unrelated dependency changes still run CI, but do not create release tags once the current tag exists.
 
 [Renovate](https://docs.renovatebot.com/) updates Cargo manifests, `Cargo.lock`, and GitHub Actions workflow action versions. DataFusion and DataFusion CLI updates are grouped together so they continue to resolve to the same version.

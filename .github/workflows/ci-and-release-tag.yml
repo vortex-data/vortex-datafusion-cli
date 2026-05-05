@@ -65,26 +65,40 @@ jobs:
         run: |
           set -euo pipefail
 
+          current_tag="$(python3 scripts/version_pair.py tag)"
           zero_sha="0000000000000000000000000000000000000000"
           if [[ "${BEFORE}" != "${zero_sha}" ]] && ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
             git fetch --no-tags --depth=1 origin "${BEFORE}" || true
           fi
 
           if [[ "${BEFORE}" == "${zero_sha}" ]] || ! git cat-file -e "${BEFORE}:Cargo.lock" 2>/dev/null; then
-            tag="$(python3 scripts/version_pair.py tag)"
-            echo "initial release tag: ${tag}"
+            echo "initial release tag: ${current_tag}"
             {
               echo "release_needed=true"
               echo "old_tag="
-              echo "new_tag=${tag}"
+              echo "new_tag=${current_tag}"
               echo "changes=initial"
             } >> "$GITHUB_OUTPUT"
           else
             git show "${BEFORE}:Cargo.lock" > /tmp/previous-Cargo.lock
+            version_output="$(mktemp)"
             python3 scripts/version_pair.py changed \
               --old /tmp/previous-Cargo.lock \
               --new Cargo.lock \
-              --github-output "$GITHUB_OUTPUT"
+              --github-output "${version_output}"
+
+            release_needed="$(awk -F= '$1 == "release_needed" { print $2 }' "${version_output}")"
+            if [[ "${release_needed}" == "false" ]] && ! git rev-parse -q --verify "refs/tags/${current_tag}" >/dev/null; then
+              echo "current release tag missing: ${current_tag}"
+              {
+                echo "release_needed=true"
+                echo "old_tag=${current_tag}"
+                echo "new_tag=${current_tag}"
+                echo "changes=missing-tag"
+              } >> "$GITHUB_OUTPUT"
+            else
+              cat "${version_output}" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Create release tag
