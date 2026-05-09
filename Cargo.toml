@@ -16,7 +16,7 @@ dirs = "6.0.0"
 env_logger = "0.11.10"
 mimalloc = "0.1.50"
 regex = "1.12.3"
-tokio = { version = "1.52.1", features = ["full"] }
+tokio = { version = "1.52.3", features = ["full"] }
 vortex-datafusion = "0.70.0"
 
 [dev-dependencies]
