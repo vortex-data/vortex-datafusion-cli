@@ -17,7 +17,7 @@ env_logger = "0.11.10"
 mimalloc = "0.1.50"
 regex = "1.12.3"
 tokio = { version = "1.52.1", features = ["full"] }
-vortex-datafusion = "0.70.0"
+vortex-datafusion = "0.73.0"
 
 [dev-dependencies]
 insta = "1.47.2"
