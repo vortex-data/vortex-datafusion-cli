@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-name: CI and Release Tag
+name: CI and Release
 
 on:
   pull_request:
@@ -50,6 +50,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      commit: ${{ steps.release.outputs.commit }}
+      publish: ${{ steps.release.outputs.publish }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -123,3 +127,137 @@ jobs:
 
           git tag "${TAG}"
           git push origin "refs/tags/${TAG}"
+
+      - name: Select binary release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          tag="$(python3 scripts/version_pair.py tag)"
+          commit="$(git rev-list -n 1 "refs/tags/${tag}")"
+          releases="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases")"
+          published="$(jq -s --arg tag "${tag}" 'any(.[][]; .tag_name == $tag and .draft == false)' <<< "${releases}")"
+          {
+            echo "tag=${tag}"
+            echo "commit=${commit}"
+            echo "publish=$([[ "${published}" == false ]] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+
+  release-build:
+    name: Release build (${{ matrix.target }})
+    needs: release-tag
+    # Tag pushes made with GITHUB_TOKEN do not trigger another workflow.
+    # Exercise the same packaging on PRs without publishing a release.
+    if: >-
+      always() && !cancelled() &&
+      (github.event_name == 'pull_request' || needs.release-tag.outputs.publish == 'true')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-apple-darwin
+            runner: macos-14
+    runs-on: ${{ matrix.runner }}
+    env:
+      TARGET: ${{ matrix.target }}
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
+      CARGO_PROFILE_RELEASE_STRIP: symbols
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release-tag.outputs.commit || github.sha }}
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --bin vortex-datafusion-cli --target "${TARGET}"
+
+      - name: Package binary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          archive="vortex-datafusion-cli-${TARGET}"
+          mkdir -p "dist/${archive}"
+          cp "target/${TARGET}/release/vortex-datafusion-cli" "dist/${archive}/"
+          cp LICENSE NOTICE "dist/${archive}/"
+          cp -R LICENSES "dist/${archive}/"
+          tar -czf "dist/${archive}.tar.gz" -C dist "${archive}"
+          cd dist
+          shasum -a 256 "${archive}.tar.gz" > "${archive}.tar.gz.sha256"
+
+      - name: Smoke test packaged binary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          archive="vortex-datafusion-cli-${TARGET}"
+          cd dist
+          shasum -a 256 -c "${archive}.tar.gz.sha256"
+          smoke_dir="$(mktemp -d)"
+          tar -xzf "${archive}.tar.gz" -C "${smoke_dir}"
+          "${smoke_dir}/${archive}/vortex-datafusion-cli" --version
+          "${smoke_dir}/${archive}/vortex-datafusion-cli" --quiet --command 'SELECT 1;'
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  release-publish:
+    name: Publish binary release
+    needs: [release-tag, release-build]
+    if: needs.release-tag.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ needs.release-tag.outputs.tag }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.release-tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          releases="$(gh api --paginate "repos/${GH_REPO}/releases")"
+          state="$(jq -sr --arg tag "${TAG}" '.[][] | select(.tag_name == $tag) | .draft' <<< "${releases}")"
+          if [[ "${state}" == false ]]; then
+            echo "Release ${TAG} is already published."
+            exit 0
+          fi
+
+          if [[ -z "${state}" ]]; then
+            gh release create "${TAG}" --verify-tag --draft --title "${TAG}" --generate-notes
+          fi
+          # Keep incomplete uploads private and allow a failed publication to be retried.
+          gh release upload "${TAG}" dist/*.tar.gz dist/*.sha256 --clobber
+          gh release edit "${TAG}" --draft=false --latest
