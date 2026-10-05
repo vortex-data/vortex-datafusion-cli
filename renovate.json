@@ -18,18 +18,11 @@
       ],
       "matchPackageNames": [
         "datafusion",
-        "datafusion-cli"
-      ],
-      "groupName": "DataFusion Rust crates"
-    },
-    {
-      "matchManagers": [
-        "cargo"
-      ],
-      "matchPackageNames": [
+        "datafusion-cli",
         "vortex-datafusion"
       ],
-      "groupName": "Vortex DataFusion"
+      "groupName": "Vortex and DataFusion Rust crates",
+      "separateMajorMinor": false
     }
   ]
 }
