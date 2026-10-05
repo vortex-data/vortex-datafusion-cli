@@ -26,7 +26,7 @@ SELECT COUNT(*) AS n, SUM(id) AS total FROM events WHERE label <> 'beta';
     .expect("write SQL script");
 
     let output = Command::new(env!("CARGO_BIN_EXE_vortex-datafusion-cli"))
-        .args(["--quiet", "--file"])
+        .args(["--quiet", "--batch-size", "2", "--file"])
         .arg(&script_path)
         .output()
         .expect("run vortex-datafusion-cli");

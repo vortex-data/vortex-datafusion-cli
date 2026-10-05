@@ -47,6 +47,7 @@ use datafusion_cli::functions::{
 use datafusion_cli::object_storage::instrumented::{
     InstrumentedObjectStoreMode, InstrumentedObjectStoreRegistry,
 };
+use datafusion_cli::object_storage::{StdinCarriesCommands, is_stdin_location};
 use datafusion_cli::{
     DATAFUSION_CLI_VERSION, exec,
     pool_type::PoolType,
@@ -55,6 +56,7 @@ use datafusion_cli::{
 };
 
 use clap::Parser;
+use datafusion::common::config::ConfigNonZeroUsize;
 use datafusion::common::config_err;
 use datafusion::config::ConfigOptions;
 use datafusion::execution::disk_manager::{DiskManagerBuilder, DiskManagerMode};
@@ -334,7 +336,7 @@ fn get_session_config(args: &Args) -> Result<SessionConfig> {
         if batch_size == 0 {
             return config_err!("batch_size must be greater than 0");
         }
-        config_options.execution.batch_size = batch_size;
+        config_options.execution.batch_size = ConfigNonZeroUsize::try_new(batch_size)?;
     };
 
     // use easier to understand "tree" mode by default
@@ -348,7 +350,13 @@ fn get_session_config(args: &Args) -> Result<SessionConfig> {
         config_options.format.null = String::from("NULL");
     }
 
-    let session_config = SessionConfig::from(config_options).with_information_schema(true);
+    let mut session_config = SessionConfig::from(config_options).with_information_schema(true);
+    if (args.command.is_empty() && args.file.is_empty())
+        || args.file.iter().any(|file| is_stdin_location(file))
+    {
+        // SQL input and a table's data source cannot both consume stdin.
+        session_config = session_config.with_extension(Arc::new(StdinCarriesCommands));
+    }
     Ok(session_config)
 }
 

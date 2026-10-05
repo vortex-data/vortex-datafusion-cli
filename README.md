@@ -48,4 +48,4 @@ Pushes to `main` create the current tag if it does not already exist. Later merg
 
 After CI passes on `main`, the workflow builds binaries from the current tag's commit and publishes a GitHub Release with both archives and their SHA-256 checksums. An existing tag without a published release is also packaged, so the first release does not require a dependency update. Published releases are left unchanged. Failed builds or draft uploads can be retried by rerunning the workflow; publication waits for both platforms to succeed. Pull requests build and smoke-test the same archives without publishing them.
 
-[Renovate](https://docs.renovatebot.com/) updates Cargo manifests, `Cargo.lock`, and GitHub Actions workflow action versions. DataFusion and DataFusion CLI updates are grouped together so they continue to resolve to the same version.
+[Renovate](https://docs.renovatebot.com/) updates Cargo manifests, `Cargo.lock`, and GitHub Actions workflow action versions. Vortex, DataFusion, and DataFusion CLI updates are grouped together, including major upgrades, so their integration uses compatible DataFusion versions.
