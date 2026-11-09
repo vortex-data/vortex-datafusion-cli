@@ -6,6 +6,8 @@ name: CI and Release
 on:
   pull_request:
   push:
+  # Releases are manual: run this workflow from `main` in the Actions tab.
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -46,7 +48,7 @@ jobs:
   release-tag:
     name: Release Tag
     needs: ci
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.deleted == false
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -61,72 +63,20 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Compare release dependency versions
-        id: versions
-        shell: bash
-        env:
-          BEFORE: ${{ github.event.before }}
-        run: |
-          set -euo pipefail
-
-          current_tag="$(python3 scripts/version_pair.py tag)"
-          zero_sha="0000000000000000000000000000000000000000"
-          if [[ "${BEFORE}" != "${zero_sha}" ]] && ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-            git fetch --no-tags --depth=1 origin "${BEFORE}" || true
-          fi
-
-          if [[ "${BEFORE}" == "${zero_sha}" ]] || ! git cat-file -e "${BEFORE}:Cargo.lock" 2>/dev/null; then
-            echo "initial release tag: ${current_tag}"
-            {
-              echo "release_needed=true"
-              echo "old_tag="
-              echo "new_tag=${current_tag}"
-              echo "changes=initial"
-            } >> "$GITHUB_OUTPUT"
-          else
-            git show "${BEFORE}:Cargo.lock" > /tmp/previous-Cargo.lock
-            version_output="$(mktemp)"
-            python3 scripts/version_pair.py changed \
-              --old /tmp/previous-Cargo.lock \
-              --new Cargo.lock \
-              --github-output "${version_output}"
-
-            release_needed="$(awk -F= '$1 == "release_needed" { print $2 }' "${version_output}")"
-            if [[ "${release_needed}" == "false" ]] && ! git rev-parse -q --verify "refs/tags/${current_tag}" >/dev/null; then
-              echo "current release tag missing: ${current_tag}"
-              {
-                echo "release_needed=true"
-                echo "old_tag=${current_tag}"
-                echo "new_tag=${current_tag}"
-                echo "changes=missing-tag"
-              } >> "$GITHUB_OUTPUT"
-            else
-              cat "${version_output}" >> "$GITHUB_OUTPUT"
-            fi
-          fi
-
       - name: Create release tag
-        if: steps.versions.outputs.release_needed == 'true'
         shell: bash
-        env:
-          TAG: ${{ steps.versions.outputs.new_tag }}
         run: |
           set -euo pipefail
 
-          head_commit="$(git rev-parse HEAD)"
-          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-            tag_commit="$(git rev-list -n 1 "${TAG}")"
-            if [[ "${tag_commit}" == "${head_commit}" ]]; then
-              echo "Tag ${TAG} already exists at HEAD."
-              exit 0
-            fi
-
-            echo "Tag ${TAG} already exists at ${tag_commit}, not HEAD ${head_commit}." >&2
-            exit 1
+          tag="$(python3 scripts/version_pair.py tag)"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            # Keep an existing tag where it is so it always names the same source.
+            echo "Tag ${tag} already exists at $(git rev-list -n 1 "${tag}"); reusing it."
+            exit 0
           fi
 
-          git tag "${TAG}"
-          git push origin "refs/tags/${TAG}"
+          git tag "${tag}"
+          git push origin "refs/tags/${tag}"
 
       - name: Select binary release
         id: release
@@ -148,11 +98,7 @@ jobs:
   release-build:
     name: Release build (${{ matrix.target }})
     needs: release-tag
-    # Tag pushes made with GITHUB_TOKEN do not trigger another workflow.
-    # Exercise the same packaging on PRs without publishing a release.
-    if: >-
-      always() && !cancelled() &&
-      (github.event_name == 'pull_request' || needs.release-tag.outputs.publish == 'true')
+    if: needs.release-tag.outputs.publish == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -170,7 +116,7 @@ jobs:
       - name: Checkout release source
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.release-tag.outputs.commit || github.sha }}
+          ref: ${{ needs.release-tag.outputs.commit }}
           persist-credentials: false
 
       - name: Install Rust
