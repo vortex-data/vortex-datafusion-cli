@@ -1,11 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-name: CI and Release
+name: Release
 
 on:
-  pull_request:
-  push:
   # Releases are manual: run this workflow from `main` in the Actions tab.
   workflow_dispatch:
     inputs:
@@ -23,37 +21,12 @@ permissions:
 jobs:
   ci:
     name: CI
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: nextest
-
-      - name: Check formatting
-        run: cargo fmt --check
-
-      - name: Check build
-        run: cargo check --locked
-
-      - name: Run tests
-        run: cargo nextest run --locked
+    uses: ./.github/workflows/ci.yml
 
   release-tag:
     name: Release Tag
     needs: ci
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
