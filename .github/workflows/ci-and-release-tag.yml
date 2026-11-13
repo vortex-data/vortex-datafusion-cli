@@ -8,6 +8,11 @@ on:
   push:
   # Releases are manual: run this workflow from `main` in the Actions tab.
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)publish, e.g. 0.90.0-55.2.0. Leave empty to release the version in main's Cargo.lock."
+        required: false
+        default: ""
 
 env:
   CARGO_TERM_COLOR: always
@@ -56,6 +61,7 @@ jobs:
       tag: ${{ steps.release.outputs.tag }}
       commit: ${{ steps.release.outputs.commit }}
       publish: ${{ steps.release.outputs.publish }}
+      latest: ${{ steps.release.outputs.latest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -64,6 +70,7 @@ jobs:
           fetch-tags: true
 
       - name: Create release tag
+        if: inputs.tag == ''
         shell: bash
         run: |
           set -euo pipefail
@@ -82,10 +89,17 @@ jobs:
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
 
-          tag="$(python3 scripts/version_pair.py tag)"
+          current_tag="$(python3 scripts/version_pair.py tag)"
+          tag="${INPUT_TAG:-${current_tag}}"
+          if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            # Only existing tags can be backfilled; new tags come from main's Cargo.lock.
+            echo "::error::Tag ${tag} does not exist."
+            exit 1
+          fi
           commit="$(git rev-list -n 1 "refs/tags/${tag}")"
           releases="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases")"
           published="$(jq -s --arg tag "${tag}" 'any(.[][]; .tag_name == $tag and .draft == false)' <<< "${releases}")"
@@ -93,6 +107,8 @@ jobs:
             echo "tag=${tag}"
             echo "commit=${commit}"
             echo "publish=$([[ "${published}" == false ]] && echo true || echo false)"
+            # A backfilled older release must not take over the "latest" release.
+            echo "latest=$([[ "${tag}" == "${current_tag}" ]] && echo true || echo false)"
           } >> "$GITHUB_OUTPUT"
 
   release-build:
@@ -191,6 +207,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.release-tag.outputs.tag }}
+          LATEST: ${{ needs.release-tag.outputs.latest }}
         run: |
           set -euo pipefail
 
@@ -206,4 +223,4 @@ jobs:
           fi
           # Keep incomplete uploads private and allow a failed publication to be retried.
           gh release upload "${TAG}" dist/*.tar.gz dist/*.sha256 --clobber
-          gh release edit "${TAG}" --draft=false --latest
+          gh release edit "${TAG}" --draft=false --latest="${LATEST}"
